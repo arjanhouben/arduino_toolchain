@@ -1,0 +1,147 @@
+# Arduino - arjan houben
+
+set( CMAKE_SYSTEM_NAME GNU )
+set( CMAKE_SYSTEM_VERSION 1 )
+
+list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_BINARY_DIR} )
+
+include( CMakeForceCompiler )
+
+if( NOT ARDUINO_DIR )
+	if( NOT EXISTS $ENV{ARDUINO_DIR} )
+		message( FATAL_ERROR "${ARDUINO_DIR} is not an existing directory,
+Please specify a valid ARDUINO_DIR in the environment.
+For example: ARDUINO_DIR=/Applications/Arduino.app cmake -DCMAKE_TOOLCHAIN_FILE=<toolchain> ..."
+		)
+	endif()
+	set( ARDUINO_DIR $ENV{ARDUINO_DIR} CACHE PATH "root of arduino app" FORCE )
+endif()
+
+set( ARDUINO_SUBDIR_AVR Contents/Resources/Java/hardware/tools/avr )
+set( ARDUINO_SUBDIR_ARDUINO Contents/Resources/Java/hardware/arduino )
+set( CMAKE_FIND_ROOT_PATH
+	${ARDUINO_DIR}
+	${ARDUINO_DIR}/${ARDUINO_SUBDIR_AVR}/bin
+	${ARDUINO_DIR}/${ARDUINO_SUBDIR_AVR}/avr/bin
+)
+#set( CMAKE_STAGING_PREFIX ${ARDUINO_DIR} )
+#set( CMAKE_SYSROOT ${ARDUINO_DIR} )
+
+set( CMAKE_FIND_ROOT_PATH_MODE_PROGRAM ONLY )
+set( CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY )
+set( CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY )
+
+CMAKE_FORCE_C_COMPILER( ${ARDUINO_DIR}/${ARDUINO_SUBDIR_AVR}/bin/avr-gcc GNU )
+CMAKE_FORCE_CXX_COMPILER( ${ARDUINO_DIR}/${ARDUINO_SUBDIR_AVR}/bin/avr-g++ GNU )
+
+find_path( arduino_system_includes
+	NAMES
+		math.h
+	PATHS
+		${ARDUINO_DIR}/${ARDUINO_SUBDIR_AVR}/avr/include
+	NO_DEFAULT_PATH
+	NO_SYSTEM_ENVIRONMENT_PATH
+	NO_CMAKE_SYSTEM_PATH
+)
+
+include_directories(
+	${arduino_system_includes}
+	${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino
+)
+
+set( arduino_source_files
+${ARDUINO_DIR}/Contents/Resources/Java/libraries/LiquidCrystal/LiquidCrystal.cpp
+${ARDUINO_DIR}/Contents/Resources/Java/libraries/SPI/SPI.cpp
+
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/avr-libc/malloc.c
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/avr-libc/realloc.c
+
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/new.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/WInterrupts.c
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/wiring.c
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/wiring_analog.c
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/wiring_digital.c
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/wiring_pulse.c
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/wiring_shift.c
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/CDC.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/HID.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/HardwareSerial.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/IPAddress.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/Print.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/Stream.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/Tone.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/USBCore.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/WMath.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/WString.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/main.cpp
+${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/cores/arduino/new.cpp
+)
+
+add_library( core STATIC
+	${arduino_source_files}
+)
+
+if( ARDUINO_TYPE STREQUAL mega )
+#-fno-exceptions
+	set( FLAGS "-g -Os -Wall -ffunction-sections -fdata-sections -mmcu=atmega2560 -MMD" )
+	set( CMAKE_CXX_FLAGS "${FLAGS}" )
+	set( CMAKE_C_FLAGS "${FLAGS}" )
+	add_definitions( -DF_CPU=16000000L -DUSB_VID=null -DUSB_PID=null -DARDUINO=106 )
+	include_directories( ${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/variants/mega )
+else()
+	message( FATAL_ERROR "please specify which arduino you are compiling for.
+For example: cmake -DARDUINO_TYPE=mega ...
+"
+	)
+endif()
+
+set( CMAKE_C_LINK_FLAGS "-Os -Wl,--gc-sections,--relax -mmcu=atmega2560" )
+set( CMAKE_CXX_LINK_FLAGS "${CMAKE_C_LINK_FLAGS}" )
+
+function( generate_hex tgt )
+	find_program(
+		CMAKE_OBJCOPY
+			objcopy
+		PATHS
+			${ARDUINO_SUBDIR_AVR}/avr/bin
+	)
+	message( ${ARDUINO_SUBDIR_AVR}/avr/bin )
+	add_custom_target(
+			${tgt}_eep
+		COMMAND
+			${CMAKE_OBJCOPY} -O ihex -j .eeprom --set-section-flags=.eeprom=alloc,load --no-change-warnings --change-section-lma .eeprom=0 $<TARGET_FILE:${tgt}> $<TARGET_FILE_NAME:${tgt}>.eep
+	)
+	add_custom_target(
+			${tgt}_hex
+		COMMAND
+			${CMAKE_OBJCOPY} -O ihex -R .eeprom --set-section-flags=.eeprom=alloc,load --no-change-warnings --change-section-lma .eeprom=0 $<TARGET_FILE:${tgt}> $<TARGET_FILE_NAME:${tgt}>.hex
+	)
+	add_dependencies( ${tgt}_eep ${tgt} )
+	add_dependencies( ${tgt}_hex ${tgt} )
+endfunction()
+
+function( upload tgt dev )
+	find_file(
+		AVRDUDE_CONF
+			avrdude.conf
+		PATHS
+			${ARDUINO_DIR}/${ARDUINO_SUBDIR_AVR}/etc
+	)
+	find_program(
+		AVRDUDE_EXE
+			avrdude
+		PATHS
+			${ARDUINO_DIR}/${ARDUINO_SUBDIR_AVR}/bin
+	)
+	if( NOT TARGET ${tgt}_hex )
+		generate_hex( ${tgt} )
+	endif()
+	add_custom_target( upload
+		COMMAND
+			${AVRDUDE_EXE} -C ${AVRDUDE_CONF} -F -v -pm168 -cstk500v1 -P${dev} -b19200 -D -Uflash:w:"$<TARGET_FILE_NAME:${tgt}>.hex":i
+		DEPENDS
+			${tgt}_hex
+	)
+endfunction()
+
+set( CMAKE_CXX_LINK_EXECUTABLE "<CMAKE_C_COMPILER> <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>" )

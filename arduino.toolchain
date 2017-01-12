@@ -82,12 +82,13 @@ add_library( core STATIC
 )
 
 if( ARDUINO_TYPE STREQUAL mega )
-#-fno-exceptions
-	set( FLAGS "-g -Os -Wall -ffunction-sections -fdata-sections -mmcu=atmega2560 -MMD" )
+	set( FLAGS "-Os -Wall -ffunction-sections -fdata-sections -mmcu=atmega2560 -MMD" )
 	set( CMAKE_CXX_FLAGS "${FLAGS}" )
 	set( CMAKE_C_FLAGS "${FLAGS}" )
-	add_definitions( -DF_CPU=16000000L -DUSB_VID=null -DUSB_PID=null -DARDUINO=106 )
+	add_definitions( -DF_CPU=16000000L -DUSB_VID=null -DUSB_PID=null -DARDUINO=106 -D__AVR_ATmega2560__ )
 	include_directories( ${ARDUINO_DIR}/${ARDUINO_SUBDIR_ARDUINO}/variants/mega )
+elseif( ARDUINO_TYPE STREQUAL nano )
+	#avr/bin/avr-g++ -c -g -Os -Wall -fno-exceptions -ffunction-sections -fdata-sections -mmcu=atmega328p -DF_CPU=16000000L -MMD -DUSB_VID=null -DUSB_PID=null -DARDUINO=106
 else()
 	message( FATAL_ERROR "please specify which arduino you are compiling for.
 For example: cmake -DARDUINO_TYPE=mega ...
@@ -138,7 +139,7 @@ function( upload tgt dev )
 	endif()
 	add_custom_target( upload
 		COMMAND
-			${AVRDUDE_EXE} -C ${AVRDUDE_CONF} -F -v -pm168 -cstk500v1 -P${dev} -b19200 -D -Uflash:w:"$<TARGET_FILE_NAME:${tgt}>.hex":i
+			${AVRDUDE_EXE} -C "${AVRDUDE_CONF}" -F -v -pm2560 -c stk500v2 -P "${dev}" -b115200 -D -Uflash:w:"$<TARGET_FILE_NAME:${tgt}>.hex":i
 		DEPENDS
 			${tgt}_hex
 	)
